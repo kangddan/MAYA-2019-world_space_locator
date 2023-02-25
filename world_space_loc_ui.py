@@ -36,8 +36,8 @@ def wspace_loc_ui():
     cmds.button(l='Bake Controls', h=40, c=lambda *a: bake_ctrl(every_frame))
 
     # cmds.separator(height=1)
-    cmds.text(label='KANG DAN DAN - 2023', w=40, h=10, )
-    cmds.separator(height=1)
+    #cmds.text(label='KANG DAN DAN - 2023', w=40, h=10, )
+    #cmds.separator(height=1)
 
     cmds.showWindow(name)
 
