@@ -52,7 +52,7 @@ def wspace_loc_ui():
     
 
     #cmds.separator(height=1)
-    cmds.text(label='World - Space - Locator - v1.2', w=40, h=15, )
+    cmds.text(label='World - Space - Locator - v1.2', w=40, h=13, )
     #cmds.separator(height=1)
     # by_kangddan 20230227
 
@@ -550,9 +550,9 @@ def bake_aim(every_frame):
             for aim_obj in select_obj:
                 cmds.delete('WSpace_loc_aim_target_' + aim_obj + '_parentConstraint', constraints=True)
                 cmds.delete('WSpace_loc_aim_up_' + aim_obj + '_parentConstraint', constraints=True)
-                cmds.cutKey(aim_obj,clear=True,attribute='rx',time=(open_key,end_key))
-                cmds.cutKey(aim_obj,clear=True,attribute='ry',time=(open_key,end_key)) 
-                cmds.cutKey(aim_obj,clear=True,attribute='rz',time=(open_key,end_key)) 
+                #cmds.cutKey(aim_obj,clear=True,attribute='rx',time=(open_key,end_key))
+                #cmds.cutKey(aim_obj,clear=True,attribute='ry',time=(open_key,end_key)) 
+                #cmds.cutKey(aim_obj,clear=True,attribute='rz',time=(open_key,end_key)) 
                 cmds.aimConstraint('WSpace_loc_aim_target_'+aim_obj,aim_obj,aimVector=aim_ver[0],upVector=aim_ver[1],
                                     maintainOffset=False,weight=1, worldUpType='object' , 
                                     name = aim_obj + '_aim_Constraint',worldUpObject='WSpace_loc_aim_up_'+aim_obj )
