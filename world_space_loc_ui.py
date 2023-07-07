@@ -1,4 +1,7 @@
+# coding=utf-8
+from functools import partial
 import maya.cmds as cmds
+import maya.api.OpenMaya as om
 import math
 
 
@@ -10,53 +13,138 @@ def wspace_loc_ui():
 
     if cmds.window(name, exists=1):
         cmds.deleteUI(name)
-    cmds.window(name, rtf=1, w=280, h=280, t=name, s=1)
-    cmds.columnLayout(rs=5, adj=1, )
+    window = cmds.window(name, rtf=1, w=280, h=280, t=name, s=1)
+    #ly0 = cmds.columnLayout(adj=True,parent=window)
+    ly1 = cmds.columnLayout(rs=5, adj=1,parent = window)
 
-    cmds.rowColumnLayout(nc=2, adj=1)
-    every_frame = cmds.checkBox(l='Bake every frame', value=False, )
-    offset_con = cmds.checkBox(l='Maintain Offset', value=False)
+    ly2 = cmds.rowColumnLayout(nc=2, adj=1,parent = ly1)
+    every_frame = cmds.checkBox(l='Bake every frame', value=False,parent=ly2 )
+    offset_con = cmds.checkBox(l='Maintain Offset', value=False,parent=ly2 )
 
 
-    cmds.setParent('..')
-    cmds.button(l='Bake to Locators', h=40, c=lambda *a: bake_loc(every_frame))
-    
+    ly3 = cmds.rowColumnLayout(nc=1, adj=1,parent = ly1)
+    cmds.button(l='Bake to Locators', h=40, c=lambda *a: bake_loc(every_frame),parent=ly3,annotation='烘焙一个定位器')
     
 
-    cmds.rowColumnLayout(nc=1, adj=1)
-    cmds.button(l='Parent constr to locator', h=40, c=lambda *a: parent_loc(offset_con))
-
-    cmds.button(l='Point constr to locator', w=115, h=25, c=lambda *a: point_loc(offset_con))
-    cmds.button(l='Orient constr to locator', w=115, h=25, c=lambda *a: orient_loc(offset_con))
-    cmds.rowColumnLayout(nc=2, adj=2, )
-    cmds.button(l='Add  aim constr', w=115, h=25,c=lambda *a: aim_obj() )
-    cmds.button(l='Bake aim group', w=115, h=25,c=lambda *a: bake_aim(every_frame))
-    cmds.setParent('..')
-    cmds.button(l='Delete Constraint', h=40, c=lambda *a: del_ctrl_constraint())
+    ly4 = cmds.rowColumnLayout(nc=1, adj=1,parent = ly1)
+    cmds.button(l='Parent constr to locator', h=40, c=lambda *a: parent_loc(offset_con),parent=ly4)
+    cmds.button(l='Point constr to locator', w=115, h=25, c=lambda *a: point_loc(offset_con),parent=ly4)
+    cmds.button(l='Orient constr to locator', w=115, h=25, c=lambda *a: orient_loc(offset_con),parent=ly4)
     
-    
-    
-    cmds.separator(height=5)
-    cmds.button(l='Select Locators', h=50, c=lambda *a: sel_loc())
-    cmds.rowColumnLayout(nc=2, adj=2, )
-    cmds.button(l='locator  +  ', w=115, h=35, c=lambda *a: scale_loc_max())
-    cmds.button(l='locator  -  ', w=115, h=35, c=lambda *a: scale_loc_low())
+    ly5 = cmds.rowColumnLayout(nc=2, adj=2,parent = ly4 )
+    cmds.button(l='Add  aim constr', w=115, h=25,c=lambda *a: aim_obj(),parent=ly5 )
+    cmds.button(l='Bake aim group', w=115, h=25,c=lambda *a: bake_aim(every_frame),parent=ly5)
     cmds.setParent('..')
     
-    cmds.separator(height=5)
+    ly6 = cmds.rowColumnLayout(nc=1, adj=1,parent = ly1)
+    cmds.button(l='Delete Constraint', h=40, c=lambda *a: del_ctrl_constraint(),parent=ly6)
+    cmds.button(l='Select Locators', h=50, c=lambda *a: sel_loc(),parent=ly6)
+    ly7 = cmds.frameLayout(l='Color Picker',collapsable=True,parent=ly6)
+    ly8 = cmds.rowColumnLayout(nc=9,adj=5,parent = ly7)
+    ######################################################################################################
+    color_lis=[(1.0, 0.0, 0.0), (1.0, 0.5, 0.0), (1.0, 1.0, 0.0), 
+                    (0.0, 1.0, 0.0), (0.0, 1.0, 1.0), (0.0, 0.0, 1.0), 
+                    (1.0, 0.5, 0.5), (0.75, 0.75, 0.75), (1.0, 1.0, 1.0)]
+    null_id = []
+    for idd,i in enumerate(range(1,10)):
+        id = cmds.button(l='ID'+str(idd+1), w=26,h=20,bgc=color_lis[idd],parent=ly8)
+        null_id.append(id)
+    '''id1 = cmds.button(l='ID1', w=26,h=20,bgc=color_lis[0],parent=ly8)
+    id2 = cmds.button(l='ID2', w=26,h=20,bgc=color_lis[1],parent=ly8)
+    id3 = cmds.button(l='ID3', w=26,h=20,bgc=color_lis[2],parent=ly8)
+    id4 = cmds.button(l='ID4', w=26,h=20,bgc=color_lis[3],parent=ly8)
+    id5 = cmds.button(l='ID5', w=26,h=20,bgc=color_lis[4],parent=ly8)
+    id6 = cmds.button(l='ID6', w=26,h=20,bgc=color_lis[5],parent=ly8)
+    id7 = cmds.button(l='ID7', w=26,h=20,bgc=color_lis[6],parent=ly8)
+    id8 = cmds.button(l='ID8', w=26,h=20,bgc=color_lis[7],parent=ly8)
+    id9 = cmds.button(l='ID9', w=26,h=20,bgc=color_lis[8],parent=ly8)
+    '''
+    ######################################################################################################
+    color_index=[13,24,17,14,18,6,20,3,16]
+    for idd,i in enumerate(range(1,10)):
+        id = cmds.button(null_id[idd], edit=True,command = partial(set_color,color_index[idd]))
+        
+    
+    '''
+    cmds.button(id1,edit=True,command = partial(set_color,13))
+    cmds.button(id2,edit=True,command = partial(set_color,24))
+    cmds.button(id3,edit=True,command = partial(set_color,17))
+    cmds.button(id4,edit=True,command = partial(set_color,14))
+    cmds.button(id5,edit=True,command = partial(set_color,18))
+    cmds.button(id6,edit=True,command = partial(set_color,6))
+    cmds.button(id7,edit=True,command = partial(set_color,20))
+    cmds.button(id8,edit=True,command = partial(set_color,3))
+    cmds.button(id9,edit=True,command = partial(set_color,16))
+    '''
+    
+    
+    
+    
+    
+    
+    ######################################################################################################
+    ly9 = cmds.rowColumnLayout(nc=2, adj=2,parent = ly6 )
+    cmds.button(l='locator  +  ', w=115, h=35, c=lambda *a: scale_loc_max(),parent = ly9)
+    cmds.button(l='locator  -  ', w=115, h=35, c=lambda *a: scale_loc_low(),parent = ly9)
+   
     
 
     
-    
-    cmds.button(l='Bake Controls', h=40, c=lambda *a: bake_ctrl(every_frame))
+    ly10 = cmds.rowColumnLayout(nc=1, adj=1,parent = ly1 )
+    cmds.button(l='Bake Controls', h=40, c=lambda *a: bake_ctrl(every_frame),parent=ly10)
     
 
-    #cmds.separator(height=1)
-    cmds.text(label='World - Space - Locator - v1.2', w=40, h=13, )
+    
+    cmds.text(label='World - Space - Locator - v1.3', w=40, h=13, )
     #cmds.separator(height=1)
     # by_kangddan 20230227
 
     cmds.showWindow(name)
+
+
+
+#############################################    set color   #####################################################
+
+def set_color(colorid,*args):  
+    s_list = cmds.ls(selection = True,flatten=True)
+    c = cmds.listRelatives (s_list, children = 1)
+    for shape in s_list:  
+        # 如果是关节，单独设置
+        if cmds.nodeType(shape) == 'joint':
+            cmds.setAttr(shape+'.overrideEnabled',1)
+            cmds.setAttr(shape+'.overrideColor',colorid)
+            continue
+            
+        # 如果这个对象是shape节点就设置颜色(主要给多个shape节点的ctrl设置颜色)
+        
+        for cc in c:
+            if cmds.objectType(cc,isAType ='shape'):
+                #shapes = cmds.listRelatives(cc, s=True)
+                cmds.setAttr(cc+'.overrideEnabled',1)
+                cmds.setAttr(cc+'.overrideColor',colorid)   
+            
+#############################################    select_obj    #####################################################
+
+#  获取所选对象的函数，返回所选对象列表
+
+def select_obj():
+    s_list = cmds.ls(selection = True)
+    return s_list
+
+s_obj = select_obj()
+
+#############################################    get time    #####################################################
+
+#  获取当前动画时长的函数，返回s最小开始值和最大结束值
+
+def pbo():
+    get_time_list = []
+    get_time_list.append(cmds.playbackOptions(query=True, animationStartTime=True))
+    get_time_list.append(cmds.playbackOptions(query=True, animationEndTime=True))
+    return get_time_list
+    
+start_t = pbo()[0]
+end_t = pbo()[1]
 
 
 #############################################    bake_loc    #####################################################
@@ -69,9 +157,6 @@ def bake_loc(every_frame):
     else:
         bake_frame = True
 
-    open_key = cmds.playbackOptions(query=True, animationStartTime=True, )
-    end_key = cmds.playbackOptions(query=True, animationEndTime=True, )
-
     bake_obj = []
 
     obj = cmds.ls(selection=True)
@@ -83,15 +168,26 @@ def bake_loc(every_frame):
             if cmds.objExists('WSpace_loc_' + tag_obj):
                 cmds.warning('One is enough')
             else:
-
+                ro = cmds.getAttr(tag_obj+'.rotateOrder')
                 new_loc = cmds.spaceLocator(name='WSpace_loc_' + tag_obj)
+                cmds.setAttr(new_loc[0]+'.rotateOrder',ro)
+                
+                ##
+                shape = cmds.listRelatives(new_loc, shapes=True)[0]
+                cmds.setAttr('{}.{}'.format(new_loc[0],'v'), lock=True, keyable=False, channelBox=False)
+                null_lis = ['lpx','lpy','lpz','lsx','lsy','lsz']
+                for i in null_lis:
+                    cmds.setAttr('{}.{}'.format(shape,i),keyable=False,channelBox=False)
+                
+                ###
+                
 
                 cmds.parentConstraint(tag_obj, new_loc, weight=1.0, maintainOffset=False)
 
                 bake_obj.append(new_loc[0])
 
         if bake_obj:
-            cmds.bakeResults(bake_obj, time=(open_key, end_key), smart=(bake_frame, 0),
+            cmds.bakeResults(bake_obj, time=(start_t, end_t), smart=(bake_frame, 0),
                              simulation=False, preserveOutsideKeys=True, sparseAnimCurveBake=False,
                              removeBakedAttributeFromLayer=False, bakeOnOverrideLayer=False,
                              minimizeRotation=True, controlPoints=False, shape=True)
@@ -332,9 +428,6 @@ def bake_ctrl(every_frame):
     else:
         bake_frame = True
 
-    open_key = cmds.playbackOptions(query=True, animationStartTime=True, )
-    end_key = cmds.playbackOptions(query=True, animationEndTime=True, )
-
     obj = cmds.ls(selection=True)
 
     parent_list = []
@@ -387,7 +480,7 @@ def bake_ctrl(every_frame):
         else:
 
             if bake_frame:
-                cmds.bakeResults(bake_list, time=(open_key, end_key), smart=(True, 0), simulation=False,
+                cmds.bakeResults(bake_list, time=(start_t, end_t), smart=(True, 0), simulation=False,
                                  preserveOutsideKeys=True, sparseAnimCurveBake=False,
                                  removeBakedAttributeFromLayer=False, bakeOnOverrideLayer=False,
                                  minimizeRotation=True, controlPoints=False, shape=True)
@@ -395,7 +488,7 @@ def bake_ctrl(every_frame):
                 cmds.delete(parent_list, constraints=True)
 
             else:
-                cmds.bakeResults(bake_list, time=(open_key, end_key), smart=(False, 0), )
+                cmds.bakeResults(bake_list, time=(start_t, end_t), smart=(False, 0), )
 
                 cmds.delete(parent_list, constraints=True)
             
@@ -502,8 +595,6 @@ def bake_aim(every_frame):
     else:
         bake_frame = True
     
-    open_key = cmds.playbackOptions(query=True, animationStartTime=True, )
-    end_key = cmds.playbackOptions(query=True, animationEndTime=True, )
     select_obj = cmds.ls(selection=True)
     bake_obj = []
     aim_ver = []
@@ -542,7 +633,7 @@ def bake_aim(every_frame):
                 bake_obj.append('WSpace_loc_aim_up_'+aim_obj)
         
         if len(bake_obj)>1:        
-            cmds.bakeResults(bake_obj, time=(open_key, end_key), smart=(bake_frame, 0),
+            cmds.bakeResults(bake_obj, time=(start_t, end_t), smart=(bake_frame, 0),
                                          simulation=False, preserveOutsideKeys=True, sparseAnimCurveBake=False,
                                          removeBakedAttributeFromLayer=False, bakeOnOverrideLayer=False,
                                          minimizeRotation=True, controlPoints=False, shape=True)
@@ -550,9 +641,9 @@ def bake_aim(every_frame):
             for aim_obj in select_obj:
                 cmds.delete('WSpace_loc_aim_target_' + aim_obj + '_parentConstraint', constraints=True)
                 cmds.delete('WSpace_loc_aim_up_' + aim_obj + '_parentConstraint', constraints=True)
-                #cmds.cutKey(aim_obj,clear=True,attribute='rx',time=(open_key,end_key))
-                #cmds.cutKey(aim_obj,clear=True,attribute='ry',time=(open_key,end_key)) 
-                #cmds.cutKey(aim_obj,clear=True,attribute='rz',time=(open_key,end_key)) 
+                #cmds.cutKey(aim_obj,clear=True,attribute='rx',time=(start_t,end_t))
+                #cmds.cutKey(aim_obj,clear=True,attribute='ry',time=(start_t,end_t)) 
+                #cmds.cutKey(aim_obj,clear=True,attribute='rz',time=(start_t,end_t)) 
                 cmds.aimConstraint('WSpace_loc_aim_target_'+aim_obj,aim_obj,aimVector=aim_ver[0],upVector=aim_ver[1],
                                     maintainOffset=False,weight=1, worldUpType='object' , 
                                     name = aim_obj + '_aim_Constraint',worldUpObject='WSpace_loc_aim_up_'+aim_obj )
@@ -572,4 +663,7 @@ def bake_aim(every_frame):
 
 #################################################    end    ######################################################
 
-wspace_loc_ui()
+if __name__ == '__main__':
+    wspace_loc_ui()
+
+
