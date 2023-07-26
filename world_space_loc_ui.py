@@ -1,669 +1,565 @@
 # coding=utf-8
+import sys
 from functools import partial
-import maya.cmds as cmds
+
 import maya.api.OpenMaya as om
-import math
+import maya.cmds as cmds
 
 
-###############################################    Ui    #########################################################
-
-
-def wspace_loc_ui():
-    name = 'World_Space_Loc'
-
-    if cmds.window(name, exists=1):
-        cmds.deleteUI(name)
-    window = cmds.window(name, rtf=1, w=280, h=280, t=name, s=1)
-    #ly0 = cmds.columnLayout(adj=True,parent=window)
-    ly1 = cmds.columnLayout(rs=5, adj=1,parent = window)
-
-    ly2 = cmds.rowColumnLayout(nc=2, adj=1,parent = ly1)
-    every_frame = cmds.checkBox(l='Bake every frame', value=False,parent=ly2 )
-    offset_con = cmds.checkBox(l='Maintain Offset', value=False,parent=ly2 )
-
-
-    ly3 = cmds.rowColumnLayout(nc=1, adj=1,parent = ly1)
-    cmds.button(l='Bake to Locators', h=40, c=lambda *a: bake_loc(every_frame),parent=ly3,annotation='烘焙一个定位器')
+class Utils(object):
     
+    
+    @classmethod
+    def obj_exists(cls, lst):
+        '''
+        接收一组列表对象，逐一检查对象是否存在 
+        return: true or false
+        '''
+        for i in lst:
+            if not cmds.objExists(i):
+                break
+        else:
+            return True
+            
+        return False  
+    
+    @classmethod
+    def get_norm_vec(cls, obj, get_type='t'):
+        '''
+        向量标准化
+        obj: 接收一个对象
+        get_type: 指定需要获取改对象的属性来标准化('t','r','s')
+        return： 标准化向量
+        '''
+        vec = om.MVector(cmds.getAttr('{}.{}'.format(obj,get_type))[0])
+        vec.normalize()
+        
+        return vec
+    
+    @classmethod
+    def cond_switch(cls, lst, func):
+        '''
+        用来判定多个条件，执行一段动态方法
+        lst: 接收一组条件列表
+        func: 接收一个函数
+        '''
+        for cond in lst:
+            if cmds.objExists(cond):
+                pass
+            else:
+                func()
+                            
+    @classmethod
+    def bake_obj(cls, obj, keys=True):
+        '''
+        烘焙关键帧，对象需要被约束才能正常运行
+        obj: 烘焙对象，可以是一组列表
+        keys: 是否烘焙每一帧
+        '''
+        start_key = cmds.playbackOptions(q=True, ast=True)
+        end_key = cmds.playbackOptions(q=True, aet=True)
+        if obj:
+            cmds.bakeResults(obj, t=(start_key, end_key), sr=[keys, 0],
+                                  sm=False, pok=False, sac=False, ral=False,
+                                  bol=False, mr=True, cp=False, s=True)
+    
+    @classmethod
+    def set_attr(cls, nodes, attrs, value):
+        '''
+        添加属性
+        nodes: 接收一个列表，批量添加对象
+        attrs：接收一个列表，批量设置属性
+        value: 接收一个列表，批量设置参数
+        '''     
+        for n in nodes:
+            for ids, i in enumerate(attrs):
+                if isinstance(value[ids], (list, tuple)):
+                    cmds.setAttr('{}.{}'.format(n,i), *value[ids]) # 如果是向量就解包
+                else:
+                    cmds.setAttr('{}.{}'.format(n,i), value[ids])
+                                        
+    @classmethod
+    def lock_attr(cls, nodes, attrs, v=False):
+        '''
+        锁定属性
+        nodes: 接收一个列表，批量添加对象
+        attrs：接收一个列表，批量锁定属性
+        '''
+        if isinstance(nodes and attrs, list):
+            if 't' in attrs:
+                attrs.remove('t')
+                attrs.extend(['tx', 'ty', 'tz'])
+            if 'r' in attrs:
+                attrs.remove('r')
+                attrs.extend(['rx', 'ry', 'rz'])
+            if 's' in attrs:
+                attrs.remove('s')
+                attrs.extend(['sx', 'sy', 'sz'])
+                
+            for n in nodes:
+                for i in attrs:
+                    cmds.setAttr('{}.{}'.format(n,i), l=False, k=False, cb=v)
+            
+    @classmethod
+    def create_loc(cls, obj, prefix):
+        '''
+        创建一个定位器，获取obj旋转顺序，并且隐藏一系列属性
+        obj: 获取该对象命名
+        prefix：添加前缀
+        return： 定位器对象
+        '''
+        ro = cmds.getAttr('{}.rotateOrder'.format(obj))
+        loc = cmds.spaceLocator(n='{}{}'.format(prefix, obj))
+        cmds.setAttr('{}.rotateOrder'.format(loc[0]), ro)
+        
+        cls.lock_attr([loc[0]], ['v', 'lpx', 'lpy', 'lpz', 'lsx', 'lsy', 'lsz'], v=False)
+        return loc[0]
+            
+    @classmethod
+    def scale_loc(cls, obj, value):
+        '''
+        缩放定位器
+        obj: 定位器对象
+        value: 缩放值
+        '''
+        try: # 没有形状节点pass
+            if cmds.nodeType(cmds.listRelatives(obj, s=True)[0]) == 'locator':
+                x = cmds.getAttr('{}.{}'.format(obj, 'lsx'))
+                Utils.set_attr([obj], ['lsx', 'lsy', 'lsz'], [x*value for i in range(3)])
+                
+            else:
+                shapes = cmds.listRelatives(obj, s=True)
+                for i in shapes:
+                    points = cmds.ls(i + '.cv[*]')[0]
+                    
+                    # if sys.version_info.major >= 3:
+                    #     cmds.scale(*[value for i in range(3)], points, r=1, ocp=1)
+                    
+                    cmds.scale(value,value,value, points, r=1, ocp=1)
+            
+        except:
+            pass
 
-    ly4 = cmds.rowColumnLayout(nc=1, adj=1,parent = ly1)
-    cmds.button(l='Parent constr to locator', h=40, c=lambda *a: parent_loc(offset_con),parent=ly4)
-    cmds.button(l='Point constr to locator', w=115, h=25, c=lambda *a: point_loc(offset_con),parent=ly4)
-    cmds.button(l='Orient constr to locator', w=115, h=25, c=lambda *a: orient_loc(offset_con),parent=ly4)
+
+class WorldSpaceLoc(object):
     
-    ly5 = cmds.rowColumnLayout(nc=2, adj=2,parent = ly4 )
-    cmds.button(l='Add  aim constr', w=115, h=25,c=lambda *a: aim_obj(),parent=ly5 )
-    cmds.button(l='Bake aim group', w=115, h=25,c=lambda *a: bake_aim(every_frame),parent=ly5)
-    cmds.setParent('..')
     
-    ly6 = cmds.rowColumnLayout(nc=1, adj=1,parent = ly1)
-    cmds.button(l='Delete Constraint', h=40, c=lambda *a: del_ctrl_constraint(),parent=ly6)
-    cmds.button(l='Select Locators', h=50, c=lambda *a: sel_loc(),parent=ly6)
-    ly7 = cmds.frameLayout(l='Color Picker',collapsable=True,parent=ly6)
-    ly8 = cmds.rowColumnLayout(nc=9,adj=5,parent = ly7)
-    ######################################################################################################
-    color_lis=[(1.0, 0.0, 0.0), (1.0, 0.5, 0.0), (1.0, 1.0, 0.0), 
+    def __init__(self):
+        self.prefix = 'WSpace_loc_'
+        
+        self.aim_grp_prefix = 'WSpace_loc_aim_grp_'
+        self.aim_prefix = 'WSpace_loc_aim_target_'
+        self.up_prefix = 'WSpace_loc_aim_up_'
+        
+        self.parent_constr = '_parentConstraint'
+        self.point_constr = '_pointConstraint'
+        self.orient_constr = '_orientConstraint'
+        self.aim_constr = '_aimConstraint'
+        self.target_constr = 'target_aimConstraint'
+        self.up_constr = 'up_aimConstraint'
+        
+
+    def bake_loc(self, every_frame, *args):
+        '''
+        烘焙所选对象动画到定位器
+        every_frame： 是否烘焙每一帧
+        '''
+        s_lst = cmds.ls(sl=True)
+        bake_lst = []
+        
+        if s_lst:
+            for obj in s_lst:
+                if cmds.objExists('{}{}'.format(self.prefix, obj)):
+                    cmds.delete('{}{}'.format(self.prefix, obj))
+                
+                loc = Utils.create_loc(obj, self.prefix)
+                bake_lst.append(loc)
+                
+                cmds.parentConstraint(obj, loc, w=1.0, mo=False)
+            
+            Utils.bake_obj(bake_lst, every_frame)
+            cmds.delete(bake_lst, cn=True)
+            cmds.select(s_lst)
+            
+
+    def parent_loc(self, offset):
+        '''
+        定位器父子约束控制器，包含一系列约束判断
+        offset: 保持偏移
+        '''
+        s_lst = cmds.ls(sl=True)
+        
+        if s_lst:
+            for obj in s_lst:   
+                if cmds.objExists('{}{}'.format(self.prefix, obj)):
+                    
+                    def constr_func():
+                        cmds.parentConstraint('{}{}'.format(self.prefix, obj), obj, w=1.0, mo=offset,
+                                              n='{}{}{}'.format(self.prefix, obj, self.parent_constr))
+                    
+                    if cmds.objExists('{}{}{}'.format(self.prefix, obj, self.parent_constr)):
+                        pass
+                    elif cmds.objExists('{}{}{}'.format(self.prefix, obj, self.point_constr)):
+                        pass
+                    elif cmds.objExists('{}{}{}'.format(self.prefix, obj, self.orient_constr)):
+                        pass
+                    elif cmds.objExists('{}{}{}'.format(self.prefix, obj, self.aim_constr)):
+                        pass    
+                    else:
+                        constr_func()
+
+
+    def point_loc(self, offset):
+        '''
+        定位器点约束控制器，包含一系列约束判断
+        offset: 保持偏移
+        '''
+        s_lst = cmds.ls(sl=True)
+
+        if s_lst:
+            for obj in s_lst:
+                if cmds.objExists('{}{}'.format(self.prefix, obj)):
+                    # 检查约束类型
+                    def constr_func():
+                        cmds.pointConstraint('{}{}'.format(self.prefix, obj), obj, w=1.0, mo=offset,
+                                             n='{}{}{}'.format(self.prefix, obj, self.point_constr))
+                    
+                    if cmds.objExists('{}{}{}'.format(self.prefix, obj, self.point_constr)):
+                        pass
+                    elif cmds.objExists('{}{}{}'.format(self.prefix, obj, self.parent_constr)):
+                        pass
+                    else:
+                        constr_func()
+   
+                                              
+    def orient_loc(self, offset):
+        '''
+        定位器旋转约束控制器，包含一系列约束判断
+        offset: 保持偏移
+        '''
+        s_lst = cmds.ls(sl=True)
+        
+        if s_lst:
+            for obj in s_lst:
+                if cmds.objExists('{}{}'.format(self.prefix, obj)):
+                    # 检查约束类型
+                    def constr_func():
+                        cmds.orientConstraint('{}{}'.format(self.prefix, obj), obj, w=1.0, mo=offset,
+                                              n='{}{}{}'.format(self.prefix, obj, self.orient_constr))
+                                              
+                    if cmds.objExists('{}{}{}'.format(self.prefix, obj, self.parent_constr)):
+                        pass
+                    elif cmds.objExists('{}{}{}'.format(self.prefix, obj, self.orient_constr)):
+                        pass
+                    elif cmds.objExists('{}{}{}'.format(self.prefix, obj, self.aim_constr)):
+                        pass
+                    else:
+                        constr_func()
+    
+    
+    def select_loc(self):
+        '''
+        选择当前对象的定位器
+        '''
+        s_lst = cmds.ls(sl=True)
+        prefix_lst = [self.aim_prefix, self.up_prefix, self.prefix]
+        
+        loc_lst = []
+        
+        if s_lst:
+            for obj in s_lst:
+                for n in prefix_lst:
+                    if cmds.objExists('{}{}'.format(n, obj)):
+                        loc_lst.append('{}{}'.format(n, obj))
+                  
+            cmds.select(loc_lst)
+ 
+            
+    def delect_constr(self):
+        '''
+        删除所选对象wspace约束
+        '''
+        s_lst = cmds.ls(sl=True)
+        constr_prefix_lst = [self.parent_constr, self.point_constr, self.orient_constr, 
+                             self.aim_constr]
+        
+        if s_lst:
+            for obj in s_lst:                
+                for n in constr_prefix_lst:
+                    if cmds.objExists('{}{}{}'.format(self.prefix, obj, n)):
+                        cmds.delete('{}{}{}'.format(self.prefix, obj, n), cn=True)
+                        # 目标约束
+                        if '{}{}{}'.format(self.prefix, obj, n) == '{}{}{}'.format(self.prefix, obj, 
+                                                                                    self.aim_constr):
+                            cmds.delete('{}{}'.format(self.aim_prefix, obj), 
+                                        '{}{}'.format(self.up_prefix, obj))
+                # 目标约束组
+                if cmds.objExists('{}{}'.format(self.aim_grp_prefix, obj)):
+                    cmds.delete('{}{}'.format(self.aim_grp_prefix, obj))
+
+
+    def bake_ctrl(self, every_frame):
+        '''
+        烘焙控制器动画，删除约束
+        every_frame： 是否烘焙每一帧
+        '''    
+        s_lst = cmds.ls(sl=True)
+        bake_lst = []
+        constr_lst = []
+        
+        # 目标约束各种组件
+        aim_lst = []
+        
+        # 约束后缀
+        constr_prefix_lst = [self.parent_constr, self.point_constr, self.orient_constr, 
+                             self.aim_constr]
+        
+        if s_lst:
+            for obj in s_lst:    
+                # 遍历约束列表
+                for n in constr_prefix_lst:
+                    # 如果存在改约束
+                    if cmds.objExists('{}{}{}'.format(self.prefix, obj, n)):
+                        bake_lst.append(obj)
+                        constr_lst.append('{}{}{}'.format(self.prefix, obj, n))
+                        
+                        # 如果是目标约束，单独处理两个定位器
+                        if '{}{}{}'.format(self.prefix, obj, n) == '{}{}{}'.format(self.prefix, obj, 
+                                                                                    self.aim_constr):
+                            aim_lst.extend(['{}{}'.format(self.aim_prefix, obj), 
+                            '{}{}'.format(self.up_prefix, obj)])
+                        
+            Utils.bake_obj(bake_lst, keys=every_frame)
+            cmds.delete(constr_lst, cn=True)
+            # 清理目标约束定位器
+            if aim_lst:
+                cmds.delete(aim_lst)
+
+
+    def scale_loc_add(self):
+        '''
+        放大定位器
+        ''' 
+        s_lst = cmds.ls(sl=True)
+        if s_lst:
+            for obj in s_lst:
+                Utils.scale_loc(obj, 1.3)
+    
+                    
+    def scale_loc_sub(self):
+        '''
+        缩小定位器
+        ''' 
+        s_lst = cmds.ls(sl=True)
+        if s_lst:
+            for obj in s_lst:
+                Utils.scale_loc(obj, 0.8)
+        
+     
+    def aim_loc(self):
+        '''
+        创建目标约束定位器   
+        '''
+        s_lst = cmds.ls(sl=True)
+        if s_lst:
+            for obj in s_lst:
+                
+                if cmds.objExists('{}{}'.format(self.aim_grp_prefix, obj)):
+                    pass
+                elif cmds.objExists('{}{}{}'.format(self.prefix, obj, self.parent_constr)):
+                    pass
+                elif cmds.objExists('{}{}{}'.format(self.prefix, obj, self.aim_constr)):
+                    pass
+                elif cmds.objExists('{}{}{}'.format(self.prefix, obj, self.orient_constr)):
+                    pass            
+                else:
+                    aim_loc = Utils.create_loc(obj, self.aim_prefix)
+                    up_loc = Utils.create_loc(obj, self.up_prefix)
+                    
+                    grp = cmds.group(aim_loc, up_loc, n='{}{}'.format(self.aim_grp_prefix,obj))            
+                    cmds.parentConstraint(obj, grp, w=1.0, mo=False,
+                                              n='{}{}{}'.format(self.prefix, obj, self.parent_constr))
+                    cmds.select(aim_loc)
+                    
+                    
+    def bake_aim(self, every_frame):
+        '''
+        烘焙目标约束定位器，并且执行目标约束
+        every_frame： 是否烘焙每一帧
+        '''
+        s_lst = cmds.ls(sl=True)
+        normal_lst = []
+        bake_lst = []
+        
+        if s_lst:
+            for obj in s_lst:
+                if Utils.obj_exists(['{}{}'.format(self.aim_grp_prefix, obj), '{}{}'.format(self.aim_prefix,obj), 
+                                     '{}{}'.format(self.up_prefix,obj)]):
+                    
+                    # 获取定位器的标准化向量
+                    normal_lst.append(Utils.get_norm_vec('{}{}'.format(self.aim_prefix,obj)))
+                    normal_lst.append(Utils.get_norm_vec('{}{}'.format(self.up_prefix,obj)))
+                    
+                    # 解组约束
+                    cmds.parent('{}{}'.format(self.aim_prefix,obj),
+                                '{}{}'.format(self.up_prefix,obj), w=True)
+                    cmds.delete('{}{}'.format(self.aim_grp_prefix, obj))
+                    
+                    cmds.parentConstraint(obj, '{}{}'.format(self.aim_prefix, obj), w=1.0, mo=True, 
+                                          n='{}{}{}'.format(self.prefix, obj, self.target_constr))
+                    cmds.parentConstraint(obj, '{}{}'.format(self.up_prefix, obj), w=1.0, mo=True, 
+                                          n='{}{}{}'.format(self.prefix, obj, self.up_constr))
+                    bake_lst.extend(['{}{}'.format(self.aim_prefix,obj), 
+                                    '{}{}'.format(self.up_prefix,obj)])
+                                    
+                    Utils.bake_obj(bake_lst, every_frame)
+                    cmds.delete('{}{}'.format(self.aim_prefix,obj), '{}{}'.format(self.up_prefix,obj), cn=True)
+                    
+                    cmds.aimConstraint('{}{}'.format(self.aim_prefix,obj), obj, aim=normal_lst[0], u=normal_lst[1], 
+                                        mo=False, w=1.0, wut='object', wuo='{}{}'.format(self.up_prefix,obj), 
+                                        n='{}{}{}'.format(self.prefix, obj, self.aim_constr))
+                    
+                    normal_lst = []
+                    cmds.select(s_lst)
+                                
+    
+    def set_color(self, colorid):  
+        '''
+        批量设置控制器颜色
+        colorid： 颜色id
+        '''
+        
+        s_lst = cmds.ls(sl=True)
+        shape = cmds.listRelatives(s_lst, c=True)
+        for obj in s_lst:  
+
+            if cmds.nodeType(obj) == 'joint':
+                Utils.set_attr([obj], ['overrideEnabled', 'overrideColor'], [1, colorid])
+                continue
+                
+            for s in shape:
+                if cmds.objectType(s, isa='shape'):
+                    Utils.set_attr([s], ['overrideEnabled', 'overrideColor'], [1, colorid])
+
+
+class WorldSpaceLocUi(object):
+    def __init__(self):
+        self.__name = 'World_Space_Locator'
+        self.windows()
+        self.layout()
+        self.button()
+    
+    def windows(self):
+        if cmds.window(self.__name, exists=1):
+            cmds.deleteUI(self.__name)
+        self.window = cmds.window(self.__name, rtf=1, w=280, h=280, t=self.__name, s=1)
+        cmds.showWindow(self.__name)
+
+    def layout(self):
+
+        self.ly1 = cmds.columnLayout(rs=5, adj=1, p=self.window)
+        self.ly2 = cmds.rowColumnLayout(nc=2, adj=1, p=self.ly1)
+        self.ly3 = cmds.rowColumnLayout(nc=1, adj=1, p=self.ly1)
+        self.ly4 = cmds.rowColumnLayout(nc=1, adj=1, p=self.ly1)
+        
+        self.button_test1()
+        
+        self.ly5 = cmds.rowColumnLayout(nc=2, adj=2, p=self.ly4)     
+        self.ly6 = cmds.rowColumnLayout(nc=1, adj=1, p=self.ly1)
+       
+        self.button_test2()       
+       
+        self.ly7 = cmds.frameLayout(l='Color Picker', cll=True, cl=True, p=self.ly6)
+        self.ly8 = cmds.rowColumnLayout(nc=9, adj=5, p=self.ly7)
+        
+        self.ly9 = cmds.rowColumnLayout(nc=2, adj=2, p=self.ly6 )
+        self.ly10 = cmds.rowColumnLayout(nc=1, adj=1, p=self.ly1)
+
+    
+    # 要定义一个方法才能正确的放置按钮顺序
+    def button_test1(self):
+        cmds.button(l='Parent Locator', h=40, c=self.parent_loc, p=self.ly4, ann='添加父子约束')
+        cmds.button(l='Point Locator', h=25, c=self.point_loc, p=self.ly4, ann='添加点约束')
+        cmds.button(l='Orient Locator', h=25, c=self.orient_loc, p=self.ly4, ann='添加旋转约束')
+    # 同上
+    def button_test2(self):
+        cmds.button(l='Delete Constraint', h=40, c=self.delect_constr, p=self.ly6, ann='删除约束')
+        cmds.button(l='Select Locators', h=50, c=self.select_loc, p=self.ly6, ann='选择所属定位器')
+        
+    def button(self):
+        self.every_frames_bool = cmds.checkBox(l='Smart Bake', v=False, p=self.ly2, ann='是否烘焙每一帧')
+        self.offset_con = cmds.checkBox(l='Maintain Offset', v=False, p=self.ly2, ann='约束是否保持偏移')
+
+        cmds.button(l='Bake Locators', h=40, c=self.bake_loc, p=self.ly3,ann='烘焙一个定位器')
+        
+        cmds.button(l='Aim Locator', w=115, h=25, c=self.aim_loc, p=self.ly5, ann='添加目标约束定位器')
+        cmds.button(l='Bake Aim', w=115, h=25, c=self.bake_aim, p=self.ly5, ann='目标约束到对象')
+
+        color_lis=[(1.0, 0.0, 0.0), (1.0, 0.5, 0.0), (1.0, 1.0, 0.0), 
                     (0.0, 1.0, 0.0), (0.0, 1.0, 1.0), (0.0, 0.0, 1.0), 
                     (1.0, 0.5, 0.5), (0.75, 0.75, 0.75), (1.0, 1.0, 1.0)]
-    null_id = []
-    for idd,i in enumerate(range(1,10)):
-        id = cmds.button(l='ID'+str(idd+1), w=26,h=20,bgc=color_lis[idd],parent=ly8)
-        null_id.append(id)
-    '''id1 = cmds.button(l='ID1', w=26,h=20,bgc=color_lis[0],parent=ly8)
-    id2 = cmds.button(l='ID2', w=26,h=20,bgc=color_lis[1],parent=ly8)
-    id3 = cmds.button(l='ID3', w=26,h=20,bgc=color_lis[2],parent=ly8)
-    id4 = cmds.button(l='ID4', w=26,h=20,bgc=color_lis[3],parent=ly8)
-    id5 = cmds.button(l='ID5', w=26,h=20,bgc=color_lis[4],parent=ly8)
-    id6 = cmds.button(l='ID6', w=26,h=20,bgc=color_lis[5],parent=ly8)
-    id7 = cmds.button(l='ID7', w=26,h=20,bgc=color_lis[6],parent=ly8)
-    id8 = cmds.button(l='ID8', w=26,h=20,bgc=color_lis[7],parent=ly8)
-    id9 = cmds.button(l='ID9', w=26,h=20,bgc=color_lis[8],parent=ly8)
-    '''
-    ######################################################################################################
-    color_index=[13,24,17,14,18,6,20,3,16]
-    for idd,i in enumerate(range(1,10)):
-        id = cmds.button(null_id[idd], edit=True,command = partial(set_color,color_index[idd]))
+        null_id = []
+        for idd,i in enumerate(range(1,10)):
+            id = cmds.button(l='ID'+str(idd+1), w=26, h=20, bgc=color_lis[idd], p=self.ly8)
+            null_id.append(id)
+            
+        color_index=[13,24,17,14,18,6,20,3,16]
+        for idd,i in enumerate(range(1,10)):
+            id = cmds.button(null_id[idd], edit=True, c = partial(self.set_color, color_index[idd]), p=self.ly8, ann='设置颜色')
+            
+        cmds.button(l='locator  +  ', w=115, h=35, c=self.scale_loc_add, p=self.ly9, ann='缩放控制器')
+        cmds.button(l='locator  -  ', w=115, h=35, c=self.scale_loc_sub, p=self.ly9, ann='缩放控制器')
         
-    
-    '''
-    cmds.button(id1,edit=True,command = partial(set_color,13))
-    cmds.button(id2,edit=True,command = partial(set_color,24))
-    cmds.button(id3,edit=True,command = partial(set_color,17))
-    cmds.button(id4,edit=True,command = partial(set_color,14))
-    cmds.button(id5,edit=True,command = partial(set_color,18))
-    cmds.button(id6,edit=True,command = partial(set_color,6))
-    cmds.button(id7,edit=True,command = partial(set_color,20))
-    cmds.button(id8,edit=True,command = partial(set_color,3))
-    cmds.button(id9,edit=True,command = partial(set_color,16))
-    '''
-    
-    
-    
-    
-    
-    
-    ######################################################################################################
-    ly9 = cmds.rowColumnLayout(nc=2, adj=2,parent = ly6 )
-    cmds.button(l='locator  +  ', w=115, h=35, c=lambda *a: scale_loc_max(),parent = ly9)
-    cmds.button(l='locator  -  ', w=115, h=35, c=lambda *a: scale_loc_low(),parent = ly9)
-   
-    
 
-    
-    ly10 = cmds.rowColumnLayout(nc=1, adj=1,parent = ly1 )
-    cmds.button(l='Bake Controls', h=40, c=lambda *a: bake_ctrl(every_frame),parent=ly10)
-    
-
-    
-    cmds.text(label='World - Space - Locator - v1.3', w=40, h=13, )
-    #cmds.separator(height=1)
-    # by_kangddan 20230227
-
-    cmds.showWindow(name)
-
-
-
-#############################################    set color   #####################################################
-
-def set_color(colorid,*args):  
-    s_list = cmds.ls(selection = True,flatten=True)
-    c = cmds.listRelatives (s_list, children = 1)
-    for shape in s_list:  
-        # 如果是关节，单独设置
-        if cmds.nodeType(shape) == 'joint':
-            cmds.setAttr(shape+'.overrideEnabled',1)
-            cmds.setAttr(shape+'.overrideColor',colorid)
-            continue
-            
-        # 如果这个对象是shape节点就设置颜色(主要给多个shape节点的ctrl设置颜色)
+        cmds.button(l='Bake Controls', h=40, c=self.bake_ctrl, p=self.ly10, ann='烘焙控制器动画')
+        cmds.text(label='World - Space - Locator - v1.5', w=40, h=13, p=self.ly10)
         
-        for cc in c:
-            if cmds.objectType(cc,isAType ='shape'):
-                #shapes = cmds.listRelatives(cc, s=True)
-                cmds.setAttr(cc+'.overrideEnabled',1)
-                cmds.setAttr(cc+'.overrideColor',colorid)   
-            
-#############################################    select_obj    #####################################################
 
-#  获取所选对象的函数，返回所选对象列表
-
-def select_obj():
-    s_list = cmds.ls(selection = True)
-    return s_list
-
-s_obj = select_obj()
-
-#############################################    get time    #####################################################
-
-#  获取当前动画时长的函数，返回s最小开始值和最大结束值
-
-def pbo():
-    get_time_list = []
-    get_time_list.append(cmds.playbackOptions(query=True, animationStartTime=True))
-    get_time_list.append(cmds.playbackOptions(query=True, animationEndTime=True))
-    return get_time_list
     
-start_t = pbo()[0]
-end_t = pbo()[1]
-
-
-#############################################    bake_loc    #####################################################
-
-
-def bake_loc(every_frame):
-    j = cmds.checkBox(every_frame, q=True, value=True)
-    if j:
-        bake_frame = False
-    else:
-        bake_frame = True
-
-    bake_obj = []
-
-    obj = cmds.ls(selection=True)
-
-    if obj:
-
-        for tag_obj in obj:
-
-            if cmds.objExists('WSpace_loc_' + tag_obj):
-                cmds.warning('One is enough')
-            else:
-                ro = cmds.getAttr(tag_obj+'.rotateOrder')
-                new_loc = cmds.spaceLocator(name='WSpace_loc_' + tag_obj)
-                cmds.setAttr(new_loc[0]+'.rotateOrder',ro)
-                
-                ##
-                shape = cmds.listRelatives(new_loc, shapes=True)[0]
-                cmds.setAttr('{}.{}'.format(new_loc[0],'v'), lock=True, keyable=False, channelBox=False)
-                null_lis = ['lpx','lpy','lpz','lsx','lsy','lsz']
-                for i in null_lis:
-                    cmds.setAttr('{}.{}'.format(shape,i),keyable=False,channelBox=False)
-                
-                ###
-                
-
-                cmds.parentConstraint(tag_obj, new_loc, weight=1.0, maintainOffset=False)
-
-                bake_obj.append(new_loc[0])
-
-        if bake_obj:
-            cmds.bakeResults(bake_obj, time=(start_t, end_t), smart=(bake_frame, 0),
-                             simulation=False, preserveOutsideKeys=True, sparseAnimCurveBake=False,
-                             removeBakedAttributeFromLayer=False, bakeOnOverrideLayer=False,
-                             minimizeRotation=True, controlPoints=False, shape=True)
-
-            cmds.delete(bake_obj, constraints=True)
-    else:
-        cmds.warning('Please select one object bake locator ')
-
-    cmds.select(obj)
-
-
-############################################    parent_loc    ####################################################
-
-
-def parent_loc(offset_con):
-    of = cmds.checkBox(offset_con, q=True, value=True)
-    if of:
-        Offseta = True
-    else:
-        Offseta = False
-
-    select_obj = cmds.ls(selection=True)
-
-    if select_obj:
-
-        for objs in select_obj:
-
-            if cmds.objExists('WSpace_loc_' + objs):
-
-                if cmds.objExists('WSpace_loc_' + objs + '_parentConstraint'):
-                    cmds.warning('There is a parent constraint')
-                elif cmds.objExists('WSpace_loc_' + objs + '_pointConstraint'):
-                    cmds.warning('There is a point constraint')
-                elif cmds.objExists('WSpace_loc_' + objs + '_orientConstraint'):
-                    cmds.warning('There is a orient constraint')
-
-
-                else:
-                    cmds.parentConstraint('WSpace_loc_' + objs, objs, weight=1.0, maintainOffset=Offseta,
-                                          name='WSpace_loc_' + objs + '_parentConstraint')
-
-            else:
-                cmds.warning('The object doesn\'t have a space locator yet')
-
-    else:
-        cmds.warning('Please select an object that needs to be constrained by a space locator')
-
-
-############################################    point_loc    #####################################################
-
-
-def point_loc(offset_con):
-    of = cmds.checkBox(offset_con, q=True, value=True)
-    if of:
-        Offseta = True
-    else:
-        Offseta = False
-
-    select_obj = cmds.ls(selection=True)
-
-    if select_obj:
-
-        for objs in select_obj:
-
-            if cmds.objExists('WSpace_loc_' + objs):
-
-                if cmds.objExists('WSpace_loc_' + objs + '_parentConstraint'):
-                    cmds.warning('There is a parent constraint')
-
-                else:
-                    if cmds.objExists('WSpace_loc_' + objs + '_pointConstraint'):
-                        cmds.warning('There is a point constraint')
-                    else:
-                        cmds.pointConstraint('WSpace_loc_' + objs, objs, weight=1.0, maintainOffset=Offseta,
-                                             name='WSpace_loc_' + objs + '_pointConstraint')
-
-            else:
-                cmds.warning('The object doesn\'t have a space locator yet')
-
-    else:
-        cmds.warning('Please select an object that needs to be constrained by a space locator')
-
-
-############################################    orient_loc    #####################################################
-
-
-def orient_loc(offset_con):
-    of = cmds.checkBox(offset_con, q=True, value=True)
-    if of:
-        Offseta = True
-    else:
-        Offseta = False
-
-    select_obj = cmds.ls(selection=True)
-
-    if select_obj:
-
-        for objs in select_obj:
-
-            if cmds.objExists('WSpace_loc_' + objs):
-
-                if cmds.objExists('WSpace_loc_' + objs + '_parentConstraint'):
-                    cmds.warning('There is a parent constraint')
-
-                else:
-                    if cmds.objExists('WSpace_loc_' + objs + '_orientConstraint'):
-                        cmds.warning('There is a orient constraint')
-                    else:
-                        cmds.orientConstraint('WSpace_loc_' + objs, objs, weight=1.0, maintainOffset=Offseta,
-                                              name='WSpace_loc_' + objs + '_orientConstraint')
-
-            else:
-                cmds.warning('The object doesn\'t have a space locator yet')
-
-    else:
-        cmds.warning('Please select an object that needs to be constrained by a space locator')
-
-
-###############################################    sel_loc    ########################################################
-
-def sel_loc():
-    select_ctrl = cmds.ls(selection=True)
-
-    null_loc_name = []
-
-    if select_ctrl:
-
-        for slobj in select_ctrl:
-            if cmds.objExists('WSpace_loc_aim_target_' + slobj) and cmds.objExists('WSpace_loc_aim_up_' + slobj) and cmds.objExists('WSpace_loc_' + slobj):
-                null_loc_name.append('WSpace_loc_aim_up_' + slobj)
-                null_loc_name.append('WSpace_loc_aim_target_' + slobj)
-                null_loc_name.append('WSpace_loc_' + slobj)
-            
-            
-            elif cmds.objExists('WSpace_loc_aim_target_' + slobj) and cmds.objExists('WSpace_loc_aim_up_' + slobj):
-                null_loc_name.append('WSpace_loc_aim_up_' + slobj)
-                null_loc_name.append('WSpace_loc_aim_target_' + slobj)
-            
-            elif cmds.objExists('WSpace_loc_' + slobj):
-
-                null_loc_name.append('WSpace_loc_' + slobj)
-                    
-            else:
-                cmds.warning('That object does not have a space locator ')
-
-        cmds.select(null_loc_name)
-
-    else:
-        cmds.warning('Please select an object that is constraints by a space locator')
-
-#  20230226 add select aim loc
-
-
-###############################################    del_ctrl_con    #####################################################
-
-
-def del_ctrl_constraint():
-    del_constraint_obj = cmds.ls(selection=True)
-
-    if del_constraint_obj:
-
-        for del_con in del_constraint_obj:
-
-            if cmds.objExists('WSpace_loc_' + del_con + '_parentConstraint') and cmds.objExists(
-                    'WSpace_loc_aim_grp_' + del_con):
-                cmds.delete('WSpace_loc_' + del_con + '_parentConstraint', constraints=True)
-                cmds.delete('WSpace_loc_aim_grp_' + del_con, constraints=False)
-            
-            
-                
-            elif cmds.objExists('WSpace_loc_' + del_con + '_parentConstraint'):
-                cmds.delete('WSpace_loc_' + del_con + '_parentConstraint', constraints=True)
-
-            elif cmds.objExists('WSpace_loc_' + del_con + '_pointConstraint') and cmds.objExists(
-                    'WSpace_loc_' + del_con + '_orientConstraint') and cmds.objExists('WSpace_loc_aim_grp_' + del_con):
-                cmds.delete('WSpace_loc_' + del_con + '_pointConstraint', constraints=True)
-                cmds.delete('WSpace_loc_' + del_con + '_orientConstraint', constraints=True)
-                cmds.delete('WSpace_loc_aim_grp_' + del_con, constraints=False)
-
-            elif cmds.objExists('WSpace_loc_' + del_con + '_pointConstraint') and cmds.objExists(
-                    'WSpace_loc_aim_grp_' + del_con):
-                cmds.delete('WSpace_loc_' + del_con + '_pointConstraint', constraints=True)
-
-                cmds.delete('WSpace_loc_aim_grp_' + del_con, constraints=False)
-
-            elif cmds.objExists('WSpace_loc_' + del_con + '_orientConstraint') and cmds.objExists(
-                    'WSpace_loc_aim_grp_' + del_con):
-
-                cmds.delete('WSpace_loc_' + del_con + '_orientConstraint', constraints=True)
-                cmds.delete('WSpace_loc_aim_grp_' + del_con, constraints=False)
-
-            elif cmds.objExists('WSpace_loc_' + del_con + '_pointConstraint') and cmds.objExists(
-                    'WSpace_loc_' + del_con + '_orientConstraint'):
-                cmds.delete('WSpace_loc_' + del_con + '_pointConstraint', constraints=True)
-                cmds.delete('WSpace_loc_' + del_con + '_orientConstraint', constraints=True)
-                
-            elif cmds.objExists('WSpace_loc_' + del_con + '_orientConstraint'):
-                cmds.delete('WSpace_loc_' + del_con + '_orientConstraint', constraints=True)
-                
-            elif cmds.objExists('WSpace_loc_' + del_con + '_pointConstraint'):
-                cmds.delete('WSpace_loc_' + del_con + '_pointConstraint', constraints=True)
-                
-            elif cmds.objExists('WSpace_loc_aim_grp_' + del_con):
-                cmds.delete('WSpace_loc_aim_grp_' + del_con, constraints=False)
-            
-            elif cmds.objExists(del_con + '_aim_Constraint') and cmds.objExists('WSpace_loc_aim_target_' + del_con) and cmds.objExists('WSpace_loc_aim_up_' + del_con): 
-                cmds.delete(del_con + '_aim_Constraint', constraints=False) 
-                cmds.delete('WSpace_loc_aim_target_' + del_con, constraints=False) 
-                cmds.delete('WSpace_loc_aim_up_' + del_con, constraints=False)
-            
-            elif cmds.objExists('WSpace_loc_aim_target_' + del_con) and cmds.objExists('WSpace_loc_aim_up_' + del_con):                 
-                cmds.delete('WSpace_loc_aim_target_' + del_con, constraints=False) 
-                cmds.delete('WSpace_loc_aim_up_' + del_con, constraints=False)
-                
-            elif cmds.objExists(del_con + '_aim_Constraint') and cmds.objExists('WSpace_loc_aim_target_' + del_con): 
-                cmds.delete(del_con + '_aim_Constraint', constraints=False) 
-                cmds.delete('WSpace_loc_aim_target_' + del_con, constraints=False) 
-            
-            elif cmds.objExists('WSpace_loc_aim_up_' + del_con):               
-                cmds.delete('WSpace_loc_aim_up_' + del_con, constraints=False)    
-                
-            else:
-                cmds.warning('The object has not been constrained by a space locator yet')
-
-
-    else:
-        cmds.warning('Please select an object that needs to have its constraints removed')
-#  20230226 add delete aim grp
-
-
-#################################################    bake_ctrl    ######################################################
-
-
-def bake_ctrl(every_frame):
-    j = cmds.checkBox(every_frame, q=True, value=True)
-    if j:
-        bake_frame = False
-    else:
-        bake_frame = True
-
-    obj = cmds.ls(selection=True)
-
-    parent_list = []
-
-    bake_list = []
-
-    no_parent_list = []
-
-    if obj:
-
-        for obj_name in obj:
-
-            if cmds.objExists('WSpace_loc_' + obj_name + '_parentConstraint'):
-
-                parent_list.append('WSpace_loc_' + obj_name + '_parentConstraint')
-
-                bake_list.append(obj_name)
-
-            elif cmds.objExists('WSpace_loc_' + obj_name + '_pointConstraint') and cmds.objExists(
-                    'WSpace_loc_' + obj_name + '_orientConstraint'):
-                parent_list.append('WSpace_loc_' + obj_name + '_pointConstraint')
-                parent_list.append('WSpace_loc_' + obj_name + '_orientConstraint')
-                bake_list.append(obj_name)
-            
-            elif cmds.objExists(obj_name + '_aim_Constraint') and cmds.objExists(
-                    'WSpace_loc_' + obj_name + '_pointConstraint'):
-                parent_list.append(obj_name + '_aim_Constraint')
-                parent_list.append('WSpace_loc_' + obj_name + '_pointConstraint')
-                bake_list.append(obj_name)
-            
-            elif cmds.objExists(obj_name + '_aim_Constraint'):
-                parent_list.append(obj_name + '_aim_Constraint')
-                bake_list.append(obj_name)
-
-            elif cmds.objExists('WSpace_loc_' + obj_name + '_pointConstraint'):
-                parent_list.append('WSpace_loc_' + obj_name + '_pointConstraint')
-                bake_list.append(obj_name)
-
-            elif cmds.objExists('WSpace_loc_' + obj_name + '_orientConstraint'):
-                parent_list.append('WSpace_loc_' + obj_name + '_orientConstraint')
-                bake_list.append(obj_name)
-
-            else:
-                no_parent_list.append(obj_name)
-
-        if no_parent_list:
-
-            cmds.warning('Please deselect the object that is not constrained by a space locator')
-
-        else:
-
-            if bake_frame:
-                cmds.bakeResults(bake_list, time=(start_t, end_t), smart=(True, 0), simulation=False,
-                                 preserveOutsideKeys=True, sparseAnimCurveBake=False,
-                                 removeBakedAttributeFromLayer=False, bakeOnOverrideLayer=False,
-                                 minimizeRotation=True, controlPoints=False, shape=True)
-
-                cmds.delete(parent_list, constraints=True)
-
-            else:
-                cmds.bakeResults(bake_list, time=(start_t, end_t), smart=(False, 0), )
-
-                cmds.delete(parent_list, constraints=True)
-            
-            if cmds.objExists('WSpace_loc_aim_target_' + obj_name) and cmds.objExists('WSpace_loc_aim_up_' + obj_name):
-                cmds.delete('WSpace_loc_aim_target_' + obj_name)
-                cmds.delete('WSpace_loc_aim_up_' + obj_name)
-                
-            if cmds.objExists('WSpace_loc_aim_target_' + obj_name): 
-                cmds.delete('WSpace_loc_aim_target_' + obj_name)
-            
-                    
-
-
-    else:
-        cmds.warning('Please select the object that needs to be baked')
-
-
-
-#################################################    loc_scale    ######################################################
-
-
-def scale_loc_max():
-    select_obj = cmds.ls(selection=True)
-    # a=1
-    if select_obj and cmds.listRelatives(select_obj[0], shapes=True) and cmds.nodeType(
-            cmds.listRelatives(select_obj[0], shapes=True)[0]) == 'locator':
-        for s in select_obj:
-            x = cmds.getAttr(s + '.localScaleX')
-            cmds.setAttr(s + '.localScaleX', x * 1.5)
-            y = cmds.getAttr(s + '.localScaleY')
-            cmds.setAttr(s + '.localScaleY', y * 1.5)
-            z = cmds.getAttr(s + '.localScaleZ')
-            cmds.setAttr(s + '.localScaleZ', z * 1.5)
-    else:
-        cmds.warning('Please select  locator ')
-
-
-def scale_loc_low():
-    select_obj = cmds.ls(selection=True)
-    # a=1
-    if select_obj and cmds.listRelatives(select_obj[0], shapes=True) and cmds.nodeType(
-            cmds.listRelatives(select_obj[0], shapes=True)[0]) == 'locator':
-        for s in select_obj:
-            x = cmds.getAttr(s + '.localScaleX')
-            cmds.setAttr(s + '.localScaleX', x / 1.2)
-            y = cmds.getAttr(s + '.localScaleY')
-            cmds.setAttr(s + '.localScaleY', y / 1.2)
-            z = cmds.getAttr(s + '.localScaleZ')
-            cmds.setAttr(s + '.localScaleZ', z / 1.2)
-    else:
-        cmds.warning('Please select  locator ')
-
-############################################    add aim constr    #####################################################
-
-def aim_obj():
-
-    select_obj = cmds.ls(selection=True)
     
-    if select_obj:
+    def bake_loc(self, *args):
+        keys = not cmds.checkBox(self.every_frames_bool, q=True, value=True)
+        WorldSpaceLoc().bake_loc(every_frame=keys)
         
-        for objs in select_obj:
-            
-            if cmds.objExists('WSpace_loc_aim_grp_' + objs):
-                cmds.warning('An aim group already exists')
-            
-            else:
-                
-                if cmds.objExists('WSpace_loc_' + objs + '_parentConstraint'):
-                    cmds.warning('There is a parent constraint')
-                    
-                elif cmds.objExists('WSpace_loc_' + objs + '_orientConstraint'):
-                    cmds.warning('There is a orient constraint')
-                
-                else:
-                    aim_grp = cmds.createNode('transform',name='WSpace_loc_aim_grp_' + objs)
-                
-                    aim_loc = cmds.spaceLocator(name='WSpace_loc_aim_target_' + objs)
-                    cmds.setAttr(aim_loc[0]+'.overrideEnabled',1)
-                    cmds.setAttr(aim_loc[0]+'.overrideColor',17)
-                    cmds.parent(aim_loc,aim_grp)
-                 
-                    up_loc = cmds.spaceLocator(name='WSpace_loc_aim_up_' + objs)
-                    cmds.setAttr(up_loc[0]+'.overrideEnabled',1)
-                    cmds.setAttr(up_loc[0]+'.overrideColor',14)
-                    cmds.parent(up_loc,aim_grp)
-                
-                    cmds.parentConstraint(objs, aim_grp, weight=1.0, maintainOffset=False,
-                                          name='WSpace_loc_aim_' + objs + '_parentConstraint')
-                                      
-                    cmds.select(aim_loc[0])
+    def parent_loc(self, *args):
+        keys = cmds.checkBox(self.offset_con, q=True, value=True)
+        WorldSpaceLoc().parent_loc(offset=keys) 
     
-    else:
-        cmds.warning('Please select an object that needs to be constrained by a aim locator')
-
-#################################################    bake aim    ######################################################
-
-
-def bake_aim(every_frame):
-    
-    #############################
-    j = cmds.checkBox(every_frame, q=True, value=True)
-    if j:
-        bake_frame = False
-    else:
-        bake_frame = True
-    
-    select_obj = cmds.ls(selection=True)
-    bake_obj = []
-    aim_ver = []
-    if select_obj:
+    def point_loc(self, *args):
+        keys = cmds.checkBox(self.offset_con, q=True, value=True)
+        WorldSpaceLoc().point_loc(offset=keys)
         
-        for aim_obj in select_obj:
-            if cmds.objExists('WSpace_loc_aim_target_'+aim_obj) and cmds.objExists('WSpace_loc_aim_up_'+aim_obj):
-            
-                ##########################################      aim     ################################################        
-                # get aim loc position
-                aim_p = cmds.xform('WSpace_loc_aim_target_'+aim_obj,query=True,translation=True,worldSpace=False)
-                # get up loc position
-                up_p = cmds.xform('WSpace_loc_aim_up_'+aim_obj,query=True,translation=True,worldSpace=False)
-                # get aim loc vector len
-                len_aim_p = math.sqrt(aim_p[0]**2 + aim_p[1]**2 + aim_p[2]**2)
-                # get aim loc vector len
-                len_up_p = math.sqrt(up_p[0]**2 + up_p[1]**2 + up_p[2]**2)
-                # norma aim vec
-                norm_aim_move = [int(aim_p[0]/len_aim_p), int(aim_p[1]/len_aim_p), int(aim_p[2]/len_aim_p)]
-                # norma up vec
-                norm_up_move = [int(up_p[0]/len_up_p), int(up_p[1]/len_up_p), int(up_p[2]/len_up_p)]
-                # add norma vec to list
-                aim_ver.append(norm_aim_move)
-                aim_ver.append(norm_up_move)
-                
-                
-                 
-                # decomposition
-                cmds.parent('WSpace_loc_aim_target_'+aim_obj,'WSpace_loc_aim_up_'+aim_obj,world=True)
-                cmds.delete('WSpace_loc_aim_grp_'+aim_obj)
-                cmds.parentConstraint(aim_obj, 'WSpace_loc_aim_target_'+aim_obj, weight=1.0, maintainOffset=True,
-                name ='WSpace_loc_aim_target_'+aim_obj+'_parentConstraint' )
-                cmds.parentConstraint(aim_obj, 'WSpace_loc_aim_up_'+aim_obj, weight=1.0, maintainOffset=True,
-                name ='WSpace_loc_aim_up_'+aim_obj+'_parentConstraint')
-                bake_obj.append('WSpace_loc_aim_target_'+aim_obj)
-                bake_obj.append('WSpace_loc_aim_up_'+aim_obj)
+    def orient_loc(self, *args):
+        keys = cmds.checkBox(self.offset_con, q=True, value=True)
+        WorldSpaceLoc().orient_loc(offset=keys)  
+    
+    def aim_loc(self, *args):
+        WorldSpaceLoc().aim_loc()
         
-        if len(bake_obj)>1:        
-            cmds.bakeResults(bake_obj, time=(start_t, end_t), smart=(bake_frame, 0),
-                                         simulation=False, preserveOutsideKeys=True, sparseAnimCurveBake=False,
-                                         removeBakedAttributeFromLayer=False, bakeOnOverrideLayer=False,
-                                         minimizeRotation=True, controlPoints=False, shape=True)
-                                 
-            for aim_obj in select_obj:
-                cmds.delete('WSpace_loc_aim_target_' + aim_obj + '_parentConstraint', constraints=True)
-                cmds.delete('WSpace_loc_aim_up_' + aim_obj + '_parentConstraint', constraints=True)
-                #cmds.cutKey(aim_obj,clear=True,attribute='rx',time=(start_t,end_t))
-                #cmds.cutKey(aim_obj,clear=True,attribute='ry',time=(start_t,end_t)) 
-                #cmds.cutKey(aim_obj,clear=True,attribute='rz',time=(start_t,end_t)) 
-                cmds.aimConstraint('WSpace_loc_aim_target_'+aim_obj,aim_obj,aimVector=aim_ver[0],upVector=aim_ver[1],
-                                    maintainOffset=False,weight=1, worldUpType='object' , 
-                                    name = aim_obj + '_aim_Constraint',worldUpObject='WSpace_loc_aim_up_'+aim_obj )
-                                    
-                aim_ver.pop(0)
-                aim_ver.pop(0)
+    def bake_aim(self, *args):
+        keys = not cmds.checkBox(self.every_frames_bool, q=True, value=True)
+        WorldSpaceLoc().bake_aim(every_frame=keys) 
     
-                                                                    
-                                                                                                                            
-        else:
-            cmds.warning('The object has no aim locator')
+    def delect_constr(self, *args):
+        WorldSpaceLoc().delect_constr()
     
-    else:
-            cmds.warning('Please select an object')  
+    def select_loc(self, *args):
+        WorldSpaceLoc().select_loc() 
+    
+    def scale_loc_add(self, *args):
+        WorldSpaceLoc().scale_loc_add()
+    
+    def scale_loc_sub(self, *args):
+        WorldSpaceLoc().scale_loc_sub() 
+    
+    def bake_ctrl(self, *args):
+        keys = not cmds.checkBox(self.every_frames_bool, q=True, value=True)
+        WorldSpaceLoc().bake_ctrl(every_frame=keys)
+    
+    def set_color(self, colorid, *args):
+        WorldSpaceLoc().set_color(colorid)
 
-
-
-#################################################    end    ######################################################
-
-if __name__ == '__main__':
-    wspace_loc_ui()
-
+            
+if __name__ == '__main__':         
+    WorldSpaceLocUi()
 
