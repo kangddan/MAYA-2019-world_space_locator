@@ -1,17 +1,36 @@
+# -*- coding: utf-8 -*-
+import sys
+from maya      import cmds
+from PySide2   import QtWidgets
+from PySide2   import QtCore
+from PySide2   import QtGui
 from functools import partial
-
-import maya.api.OpenMaya as om
-import maya.cmds as cmds
-
+from maya.api  import OpenMaya as om2
 
 class Utils(object):
+    @classmethod
+    def add_undo(cls, func):
+        def undo(*args, **kwargs):
+            cmds.undoInfo(openChunk=True)
+            func(*args, **kwargs)
+            cmds.undoInfo(closeChunk=True)
+        return undo
+    
+    @classmethod
+    def mayaWindow(cls):
+        from maya.OpenMayaUI import MQtUtil
+        from shiboken2       import wrapInstance
+        if sys.version_info.major >= 3:
+            return wrapInstance(int(MQtUtil.mainWindow()), QtWidgets.QMainWindow)
+        else:
+            return wrapInstance(long(MQtUtil.mainWindow()), QtWidgets.QMainWindow)
 
     @classmethod
     def obj_exists(cls, lst):
         '''
         Check if a list of objects exists one by one.
         return: True or False
-        
+               
         '''
         for i in lst:
             if not cmds.objExists(i):
@@ -25,12 +44,12 @@ class Utils(object):
     def get_norm_vec(cls, obj, get_type='t'):
         '''
         Normalize a vector.
-        obj: Object to get the attribute from.
+        obj: Object to get the attribute from2.
         get_type: Specify the attribute to get from the object ('t', 'r', 's').
         return: Normalized vector.
         
         '''
-        vec = om.MVector(cmds.getAttr('{}.{}'.format(obj, get_type))[0])
+        vec = om2.MVector(cmds.getAttr('{}.{}'.format(obj, get_type))[0])
         vec.normalize()
 
         return vec
@@ -76,7 +95,7 @@ class Utils(object):
         for n in nodes:
             for ids, i in enumerate(attrs):
                 if isinstance(value[ids], (list, tuple)):
-                    cmds.setAttr('{}.{}'.format(n, i), *value[ids])  # 如果是向量就解包
+                    cmds.setAttr('{}.{}'.format(n, i), *value[ids])
                 else:
                     cmds.setAttr('{}.{}'.format(n, i), value[ids])
 
@@ -108,7 +127,7 @@ class Utils(object):
     def create_loc(cls, obj, prefix):
         '''
         Create a locator, get the object's rotate order, and hide a series of attributes.
-        obj: The object to get the name from.
+        obj: The object to get the name from2.
         prefix: The prefix to be added.
         return: Locator object.
         
@@ -128,7 +147,7 @@ class Utils(object):
         value: Scale value.
         
         '''
-        try:  # 没有形状节点pass
+        try: 
             if cmds.nodeType(cmds.listRelatives(obj, s=True)[0]) == 'locator':
                 x = cmds.getAttr('{}.{}'.format(obj, 'lsx'))
                 Utils.set_attr([obj], ['lsx', 'lsy', 'lsz'], [x * value for i in range(3)])
@@ -277,7 +296,7 @@ class WorldSpaceLoc(object):
 
             cmds.select(loc_lst)
 
-    def delect_constr(self):
+    def delete_constr(self):
         '''
         Delete world space constraints on selected objects.
         
@@ -346,12 +365,6 @@ class WorldSpaceLoc(object):
         if s_lst:
             for obj in s_lst:
                 Utils.scale_loc(obj, num)
-
-    # def scale_loc_sub(self):
-    #     s_lst = cmds.ls(sl=True)
-    #     if s_lst:
-    #         for obj in s_lst:
-    #             Utils.scale_loc(obj, num)
 
     def aim_loc(self):
         '''
@@ -437,121 +450,315 @@ class WorldSpaceLoc(object):
                 if cmds.objectType(s, isa='shape'):
                     Utils.set_attr([s], ['overrideEnabled', 'overrideColor'], [1, colorid])
 
+class MyCheckBox(QtWidgets.QCheckBox):
+    
+    def __init__(self, text=None, parent=None):
+        super(MyCheckBox, self).__init__(text=text, parent=parent)
+        font = QtGui.QFont('marlett') 
+        font.setPointSize(font.pointSize() * 1.2) 
+        label = QtWidgets.QLabel('b', self)
+        label.setFont(font)
+        label.move(-5, -2)
+        label.hide()
+        self.clicked.connect(lambda : label.show() if self.isChecked() else label.hide())
+        self.setStyleSheet("""
 
-class WorldSpaceLocUi(object):
-    def __init__(self):
-        self.__name = 'World_Space_Locator'
-        self.windows()
-        self.layout()
-        self.button()
+                        QCheckBox::indicator {
+                        border: 3px solid #666666;  
+                        border-radius: 3px;           
+                        }
+                        
+                        QCheckBox::indicator:hover {
+                        border: 3px solid #828282;              
+                        }
+                        
+                        QCheckBox::indicator:checked {
+                        background-color: #545A99;       
+                        border: 0px;       
+                        }
+                        
+                        QCheckBox::indicator:checked:hover {
+                        background-color: #8289D9;      
+                        border: 0px;             
+                        }
+                        
+                        """ 
+                        )
+                        
+class WSpaceWindow(QtWidgets.QDialog):
+    SLIDER_BASIC_VALUE = 50
+    
+    dig_instance = None 
+    @classmethod
+    def show_window(cls):
+        if not cls.dig_instance: 
+            cls.dig_instance = WSpaceWindow()
+            
+        if cls.dig_instance.isHidden():
+            cls.dig_instance.show() 
+        else:
+            cls.dig_instance.raise_()
+            cls.dig_instance.activateWindow()
+            
+    def __init__(self, window_parent=Utils.mayaWindow()):
+        super(WSpaceWindow, self).__init__(parent=window_parent)
+        self.wsl = WorldSpaceLoc()
+        self.setWindowTitle('World Space Locator')
+        self.main_layout = QtWidgets.QVBoxLayout()
+        if sys.version_info.major < 3:
+            self.setWindowFlags(self.windowFlags() ^ QtCore.Qt.WindowContextHelpButtonHint)
+        self.main_layout.addLayout(self.check_box())
+        self.main_layout.addLayout(self.bake_layout())
+        self.main_layout.addLayout(self.loc_layout())
+        self.main_layout.setSpacing(5)
+        self.main_layout.addStretch()
+        
+        self.main_layout.setContentsMargins(4, 5,    4, 5)
+        self.setLayout(self.main_layout)
+        self.geometry = None 
+        
+    def showEvent(self, event):
+        super(WSpaceWindow, self).showEvent(event)
+        if self.geometry:
+            
+            self.restoreGeometry(self.geometry)
+    
+    def closeEvent(self, event): 
+        if isinstance(self, WSpaceWindow): 
+            super(WSpaceWindow, self).closeEvent(event)
+            self.geometry = self.saveGeometry()
+    
+    def check_box(self):
+                            
+        self.Bake_check   = MyCheckBox('Bake Every Frame   ')
+        
+        self.Offset_check = MyCheckBox('Maintain Offset  ')
+        #self.Offset_check.setLayoutDirection(QtCore.Qt.RightToLeft)
+        
+        self.check_ly = QtWidgets.QHBoxLayout()
+        self.check_ly.addWidget(self.Bake_check)
+        self.check_ly.addStretch()
+        self.check_ly.addWidget(self.Offset_check)
+        return self.check_ly
+    ##########################  bake ly  #################################      
+    def bake_layout(self):
+        self.baake_ly = QtWidgets.QVBoxLayout()
+        self.baake_ly.setSpacing(1)
+        self.baake_ly.addLayout(self.bake_button())
+        self.baake_ly.addLayout(self.aim_button())
+        return self.baake_ly
+          
+    def bake_button(self):
+        button_names = ['Bake Locators', 'Parent Locator', 
+                        'Point Locator', 'Orient Locator']
+        self.button_objs = [QtWidgets.QPushButton(name) for name in button_names]
+        self.button_objs[0].setMinimumSize(0, 55)
+        self.button_objs[1].setMinimumSize(0, 50)
+        
+        self.button_objs[0].setIcon(QtGui.QIcon(':holder.svg'))
+        self.button_objs[1].setIcon(QtGui.QIcon(':parentConstraint.png'))
+        self.button_objs[2].setIcon(QtGui.QIcon(':pointConstraint.svg'))
+        self.button_objs[3].setIcon(QtGui.QIcon(':orientConstraint.svg'))
+        
+        self.button_objs[0].clicked.connect(self.bake_loc)
+        self.button_objs[1].clicked.connect(self.parent_loc)
+        self.button_objs[2].clicked.connect(self.point_loc)
+        self.button_objs[3].clicked.connect(self.orient_loc)
+        
 
-    def windows(self):
-        if cmds.window(self.__name, exists=1):
-            cmds.deleteUI(self.__name)
-        self.window = cmds.window(self.__name, rtf=1, w=280, h=280, t=self.__name, s=1)
-        cmds.showWindow(self.__name)
+        self.bake_button_ly = QtWidgets.QVBoxLayout()
+        #self.bake_button_ly.setSpacing(2)
+        for ids, button in enumerate(self.button_objs):
+            self.bake_button_ly.addWidget(button)
+            if ids in [0, 1]:
+                button.setStyleSheet("color: rgb(255, 255, 136);") 
+                  
+        return self.bake_button_ly
+        
+    def aim_button(self):
+        self.add_aim_loc = QtWidgets.QPushButton(QtGui.QIcon(':aimConstraint.png'), 'Aim Locator')
+        self.bake_aim    = QtWidgets.QPushButton(QtGui.QIcon(':timeplay.png'), 'Bake Aim')
 
-    def layout(self):
+        
+        self.add_aim_loc.clicked.connect(self.aim_loc)
+        self.bake_aim.clicked.connect(self.bake_aim_loc)
+        
+        self.aim_ly = QtWidgets.QHBoxLayout()
+        self.aim_ly.addWidget(self.add_aim_loc)
+        self.aim_ly.addWidget(self.bake_aim)
+        return self.aim_ly
+        
+        
+    ##########################  bake ly  #################################   
+    
+    def loc_layout(self):
+        self.loc_ly = QtWidgets.QVBoxLayout()
+        self.loc_ly.setSpacing(1)
+        self.loc_ly.addLayout(self.loc_button())
+        self.loc_ly.addLayout(self.loc_attr())
+        self.loc_ly.addLayout(self.bake_con())
+        
+        return self.loc_ly
+        
+    def loc_button(self):
+        self.del_button = QtWidgets.QPushButton(QtGui.QIcon(':deleteClip.png'), 'Del Constraint')
+        self.del_button.setMinimumSize(0, 50)
+        self.sl_loc = QtWidgets.QPushButton(QtGui.QIcon(':locator.svg'), 'Select Locators')
+        self.sl_loc.setMinimumSize(0, 50)
+        
+        self.del_button.clicked.connect(self.delete_constr)
+        self.sl_loc.clicked.connect(self.select_loc)
+        
+        self.v_ly = QtWidgets.QVBoxLayout()
+        self.v_ly.addWidget(self.del_button)
+        self.v_ly.addWidget(self.sl_loc)
+        return self.v_ly
+        
+    def loc_attr(self):
+        input_style_sheet = """
+                    QSlider::groove:horizontal {    
+                        border: none;
+                        height: 5px;                 
+                        background-color: #1C1C1C;  
+                    }
 
-        self.ly1 = cmds.columnLayout(rs=5, adj=1, p=self.window)
-        self.ly2 = cmds.rowColumnLayout(nc=2, adj=1, p=self.ly1)
-        self.ly3 = cmds.rowColumnLayout(nc=1, adj=1, p=self.ly1)
-        self.ly4 = cmds.rowColumnLayout(nc=1, adj=1, p=self.ly1)
+                    QSlider::handle:horizontal {      
+                        background-color: #FFFFFF;   
+                        width: 10px;                  
+      
+                        margin: -5px 0px -5px 0px;   
+                        border-radius: 2px;
+                    }
 
-        self.button_test1()
+                    QSlider::sub-page:horizontal { 
+                        background-color: #8289D9;
+                    }
+                    """
+        basic_style_sheet = """
+                    QSlider::groove:horizontal {     
+                        border: none;
+                        height: 5px;                
+                        background-color: #1C1C1C;  
+                    }
 
-        self.ly5 = cmds.rowColumnLayout(nc=2, adj=2, p=self.ly4)
-        self.ly6 = cmds.rowColumnLayout(nc=1, adj=1, p=self.ly1)
+                    QSlider::handle:horizontal {      
+                        background-color: #B4B4B4;    
+                        width: 10px;                  
+      
+                        margin: -5px 0px -5px 0px;  
+                        border-radius: 2px;
+                    }
 
-        self.button_test2()
+                    QSlider::sub-page:horizontal { 
+                        background-color: #545A99;
+                    }
+                    """
+        self.loc_attr_h_ly = QtWidgets.QHBoxLayout()
+        self.loc_scale_text = QtWidgets.QLabel('  Loc Scale  ')
+        
+        self.loc_scale_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        self.loc_scale_slider.setStyleSheet(basic_style_sheet)
+        self.loc_scale_slider.enterEvent = lambda event: self.loc_scale_slider.setStyleSheet(input_style_sheet)
+        self.loc_scale_slider.leaveEvent = lambda event: self.loc_scale_slider.setStyleSheet(basic_style_sheet)
+        
+        self.loc_scale_slider.setRange(0, 100)
+        self.loc_scale_slider.setValue(50)
+        
+        self.loc_scale_slider.sliderPressed.connect(lambda: cmds.undoInfo(openChunk=True)) 
+        
+        self.loc_scale_slider.sliderMoved.connect(self.scale_loc_addaa) 
+        
+          
+        self.loc_scale_slider.sliderReleased.connect(lambda: (self.loc_scale_slider.setValue(50), 
+                                                              cmds.undoInfo(closeChunk=True)))
+                                                              
+                                                              
+        self.loc_scale_slider.sliderReleased.connect(self.resete_slider_basic_value)                                                    
+       
+        
+        self.loc_attr_h_ly.addWidget(self.loc_scale_text)
+        self.loc_attr_h_ly.addWidget(self.loc_scale_slider)
+        return self.loc_attr_h_ly
+        
+    def bake_con(self):
+        self.info = QtWidgets.QLabel('World - Space - Locator - v1.6')
+        self.info.setAlignment(QtCore.Qt.AlignCenter)
+        self.bake_button = QtWidgets.QPushButton(QtGui.QIcon(':bakeAnimation.png'), 'Bake Controls')
+        self.bake_button.setStyleSheet("color: rgb(255, 255, 136);") 
+        self.bake_button.setMinimumSize(0, 60)
+        self.bake_button.clicked.connect(self.bake_ctrl)
 
-        self.ly7 = cmds.frameLayout(l='Color Picker', cll=True, cl=True, p=self.ly6)
-        self.ly8 = cmds.rowColumnLayout(nc=9, adj=5, p=self.ly7)
+        self.bake_con_v_ly = QtWidgets.QVBoxLayout()
+        self.bake_con_v_ly.setSpacing(0)
+        self.bake_con_v_ly.addWidget(self.bake_button)
+        self.bake_con_v_ly.addWidget(self.info)
+        return self.bake_con_v_ly
 
-        self.ly9 = cmds.rowColumnLayout(nc=2, adj=2, p=self.ly6)
-        self.ly10 = cmds.rowColumnLayout(nc=1, adj=1, p=self.ly1)
-
-    # To arrange the button order correctly, you need to define a method.
-    def button_test1(self):
-        cmds.button(l='Parent Locator', h=40, c=self.parent_loc, p=self.ly4, ann='Add parent-child constraint')
-        cmds.button(l='Point Locator', h=25, c=self.point_loc, p=self.ly4, ann='Add point constraint')
-        cmds.button(l='Orient Locator', h=25, c=self.orient_loc, p=self.ly4, ann='Add orient constraint')
-
-    # Same as above
-    def button_test2(self):
-        cmds.button(l='Delete Constraint', h=40, c=self.delect_constr, p=self.ly6, ann='Delete constraints')
-        cmds.button(l='Select Locators', h=50, c=self.select_loc, p=self.ly6, ann='Select associated locators')
-
-    def button(self):
-        self.every_frames_bool = cmds.checkBox(l='Smart Bake', v=False, p=self.ly2, ann='Whether to bake every frame')
-        self.offset_con = cmds.checkBox(l='Maintain Offset', v=False, p=self.ly2, ann='Whether to maintain offset in constraints')
-
-        cmds.button(l='Bake Locators', h=40, c=self.bake_loc, p=self.ly3, ann='Bake selected objects animation to locators')
-
-        cmds.button(l='Aim Locator', w=115, h=25, c=self.aim_loc, p=self.ly5, ann='Create aim constraint locators')
-        cmds.button(l='Bake Aim', w=115, h=25, c=self.bake_aim, p=self.ly5, ann='Bake aim constraint locators and apply aim constraints')
-
-        color_lis = [(1.0, 0.0, 0.0), (1.0, 0.5, 0.0), (1.0, 1.0, 0.0),
-                     (0.0, 1.0, 0.0), (0.0, 1.0, 1.0), (0.0, 0.0, 1.0),
-                     (1.0, 0.5, 0.5), (0.75, 0.75, 0.75), (1.0, 1.0, 1.0)]
-        null_id = []
-        for idd, i in enumerate(range(1, 10)):
-            id = cmds.button(l='ID' + str(idd + 1), w=26, h=20, bgc=color_lis[idd], p=self.ly8)
-            null_id.append(id)
-
-        color_index = [13, 24, 17, 14, 18, 6, 20, 3, 16]
-        for idd, i in enumerate(range(1, 10)):
-            id = cmds.button(null_id[idd], edit=True, c=partial(self.set_color, color_index[idd]), p=self.ly8,
-                             ann='Set color')
-
-        cmds.button(l='locator  +  ', w=115, h=35, c=self.scale_loc_add, p=self.ly9, ann='Scale locator')
-        cmds.button(l='locator  -  ', w=115, h=35, c=self.scale_loc_sub, p=self.ly9, ann='Scale locator')
-
-        cmds.button(l='Bake Controls', h=40, c=self.bake_ctrl, p=self.ly10, ann='Bake controller animation')
-        cmds.text(label='World - Space - Locator - v1.5', w=40, h=13, p=self.ly10)
-
-    def bake_loc(self, *args):
-        keys = not cmds.checkBox(self.every_frames_bool, q=True, value=True)
-        WorldSpaceLoc().bake_loc(every_frame=keys)
-
-    def parent_loc(self, *args):
-        keys = cmds.checkBox(self.offset_con, q=True, value=True)
-        WorldSpaceLoc().parent_loc(offset=keys)
-
-    def point_loc(self, *args):
-        keys = cmds.checkBox(self.offset_con, q=True, value=True)
-        WorldSpaceLoc().point_loc(offset=keys)
-
-    def orient_loc(self, *args):
-        keys = cmds.checkBox(self.offset_con, q=True, value=True)
-        WorldSpaceLoc().orient_loc(offset=keys)
-
-    def aim_loc(self, *args):
-        WorldSpaceLoc().aim_loc()
-
-    def bake_aim(self, *args):
-        keys = not cmds.checkBox(self.every_frames_bool, q=True, value=True)
-        WorldSpaceLoc().bake_aim(every_frame=keys)
-
-    def delect_constr(self, *args):
-        WorldSpaceLoc().delect_constr()
-
-    def select_loc(self, *args):
-        WorldSpaceLoc().select_loc()
-
-    def scale_loc_add(self, *args):
-        WorldSpaceLoc().scale_loc_add(1.3)
-
-    def scale_loc_sub(self, *args):
-        WorldSpaceLoc().scale_loc_add(0.8)
-
-    def bake_ctrl(self, *args):
-        keys = not cmds.checkBox(self.every_frames_bool, q=True, value=True)
-        WorldSpaceLoc().bake_ctrl(every_frame=keys)
-
-    def set_color(self, colorid, *args):
-        WorldSpaceLoc().set_color(colorid)
-
-
+    @Utils.add_undo
+    def bake_loc(self):
+        bl = not bool(self.Bake_check.checkState())
+        self.wsl.bake_loc(every_frame=bl)
+        
+    @Utils.add_undo
+    def parent_loc(self):
+        bl = bool(self.Offset_check.checkState())
+        self.wsl.parent_loc(offset=bl)
+        
+    @Utils.add_undo
+    def point_loc(self):
+        bl = bool(self.Offset_check.checkState())
+        self.wsl.point_loc(offset=bl)
+        
+    @Utils.add_undo
+    def orient_loc(self):
+        bl = bool(self.Offset_check.checkState())
+        self.wsl.orient_loc(offset=bl)
+        
+    @Utils.add_undo
+    def aim_loc(self):
+        self.wsl.aim_loc()
+        
+    @Utils.add_undo
+    def bake_aim_loc(self):
+        bl = not bool(self.Bake_check.checkState())
+        self.wsl.bake_aim(every_frame=bl)
+        
+    @Utils.add_undo
+    def delete_constr(self):
+        self.wsl.delete_constr()
+        
+    @Utils.add_undo
+    def select_loc(self):
+        self.wsl.select_loc()
+        
+    def resete_slider_basic_value(self):
+        SLIDER_BASIC_VALUE = 50
+    
+    def scale_loc_addaa(self):
+        slider_value = self.loc_scale_slider.value()
+        
+        if slider_value > WSpaceWindow.SLIDER_BASIC_VALUE:
+            self.wsl.scale_loc_add(num=1.05)        
+        
+        elif slider_value < WSpaceWindow.SLIDER_BASIC_VALUE:
+            self.wsl.scale_loc_add(num=1 / 1.05)
+            
+        WSpaceWindow.SLIDER_BASIC_VALUE = slider_value 
+        
+    @Utils.add_undo
+    def bake_ctrl(self):
+        bl = not bool(self.Bake_check.checkState())
+        self.wsl.bake_ctrl(every_frame=bl)
+        
 if __name__ == '__main__':
-    WorldSpaceLocUi()
+
+    try:
+        wswindow.close() # pylint: disable=E0601
+        wswindow.deleteLater()
+    except:
+        pass
+        
+    wswindow = WSpaceWindow()
+    wswindow.show()
+
+            
